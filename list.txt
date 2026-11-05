@@ -1,4 +1,12 @@
 সিঙ্গাপুর (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/singapore.conf
+সিঙ্গাপুর ২ (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/singapore2.conf
 জাপান (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/japan.conf
 নেদারল্যান্ডস (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/netherlands.conf
 আমেরিকা (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/america.conf
+আমেরিকা ২ (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/america2.conf
+কানাডা (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/canada.conf
+সুইজারল্যান্ড (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/switzerland.conf
+মেক্সিকো (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/mexico.conf
+নরওয়ে (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/norway.conf
+পোল্যান্ড (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/poland.conf
+রোমানিয়া (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/romania.conf
