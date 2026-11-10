@@ -10,3 +10,5 @@
 নরওয়ে (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/norway.conf
 পোল্যান্ড (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/poland.conf
 রোমানিয়া (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/romania.conf
+ক্যালিফোর্নিয়া (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/california.conf
+ক্যালিফোর্নিয়া ২ (ফ্রি)|https://raw.githubusercontent.com/bdonlineincome90-spec/sumon-vpn/main/california2.conf
