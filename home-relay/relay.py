@@ -26,6 +26,9 @@
 নিয়ম:
   * কোড ৬ সংখ্যার। নিবন্ধনের ৩০ মিনিট পর মেয়াদ শেষ।
   * অজানা বা মেয়াদোত্তীর্ণ কোডে /poll ও /respond দেয় HTTP 410।
+  * ভুল কোডের তালা: একই IP থেকে ৫ মিনিটে ৫ বার ভুল কোড দিলে
+    সেই IP ১৫ মিনিটের জন্য বন্ধ (HTTP 429)। সঠিক কোড দিলে
+    ভুলের হিসাব মুছে যায়। /register-ও প্রতি IP-তে ঘণ্টায় ১০টার বেশি নয়।
   * সার্ভার request/response-এর body কখনো লগ করে না, আর ফরওয়ার্ড
     করার পর আর কোথাও জমিয়ে রাখে না। রাউটারের পাসওয়ার্ড সার্ভারের
     কাছে শুধুই ফরওয়ার্ড করা বাইট — পড়া বা জমানো হয় না।
@@ -47,6 +50,13 @@ SESSION_TTL = 30 * 60      # কোডের মেয়াদ: ৩০ মি�
 POLL_HOLD = 25             # long-poll ধরে রাখার সময় (সেকেন্ড)
 PROXY_WAIT = 30            # /r/ উত্তরের জন্য অপেক্ষা (সেকেন্ড)
 MAX_BODY = 10 * 1024 * 1024  # এক অনুরোধে সর্বোচ্চ ১০ MB
+
+# ভুল কোডের তালা: এতবার ভুল কোড (এক IP থেকে, এই সময়ের মধ্যে) -> তালা
+MAX_FAILS = 5
+FAIL_WINDOW = 5 * 60
+LOCKOUT = 15 * 60        # তালার মেয়াদ (সেকেন্ড)
+REG_LIMIT = 10           # /register: প্রতি IP, প্রতি ঘণ্টায় সর্বোচ্চ
+REG_WINDOW = 60 * 60
 
 # ফরওয়ার্ড করা যাবে না এমন হেডার (hop-by-hop)
 HOP_HEADERS = {
@@ -99,6 +109,45 @@ def _drop_expired():
     with _sessions_lock:
         for code in [c for c, s in _sessions.items() if s.expired()]:
             del _sessions[code]
+
+
+# -- ভুল কোডের হিসাব (প্রতি IP) --
+_attempts = {}   # ip -> {"fails": [ts], "locked_until": float, "regs": [ts]}
+_attempts_lock = threading.Lock()
+
+
+def _attempts_for(ip):
+    rec = _attempts.get(ip)
+    if rec is None:
+        rec = {"fails": [], "locked_until": 0.0, "regs": []}
+        _attempts[ip] = rec
+    return rec
+
+
+def _ip_locked(ip):
+    with _attempts_lock:
+        rec = _attempts.get(ip)
+        return bool(rec and time.time() < rec["locked_until"])
+
+
+def _record_fail(ip):
+    now = time.time()
+    with _attempts_lock:
+        rec = _attempts_for(ip)
+        rec["fails"] = [t for t in rec["fails"] if now - t < FAIL_WINDOW]
+        rec["fails"].append(now)
+        if len(rec["fails"]) >= MAX_FAILS:
+            rec["locked_until"] = now + LOCKOUT
+            rec["fails"] = []
+            print("[relay] lock: %s (ভুল কোড %d বার)" % (ip, MAX_FAILS),
+                  flush=True)
+
+
+def _record_success(ip):
+    with _attempts_lock:
+        rec = _attempts.get(ip)
+        if rec:
+            rec["fails"] = []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -159,6 +208,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path != "/" and _ip_locked(self.client_address[0]):
+            self._send_json(429, {"error": "too many wrong codes, try later"})
+            return
         if path == "/":
             _drop_expired()
             with _sessions_lock:
@@ -178,6 +230,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if _ip_locked(self.client_address[0]):
+            self._send_json(429, {"error": "too many wrong codes, try later"})
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/register":
@@ -191,16 +246,32 @@ class Handler(BaseHTTPRequestHandler):
 
     # PUT/DELETE-ও প্রক্সির জন্য দরকার হতে পারে (রাউটার সেটিংস বদলাতে)
     def do_PUT(self):
+        if _ip_locked(self.client_address[0]):
+            self._send_json(429, {"error": "too many wrong codes, try later"})
+            return
         if self.path.startswith("/r/"):
             self._handle_proxy()
         else:
             self._send_json(404, {"error": "not found"})
 
     def do_DELETE(self):
+        if _ip_locked(self.client_address[0]):
+            self._send_json(429, {"error": "too many wrong codes, try later"})
+            return
         if self.path.startswith("/r/"):
             self._handle_proxy()
         else:
             self._send_json(404, {"error": "not found"})
+
+    # -- কোড যাচাই: সঠিক হলে ভুলের হিসাব মোছে, ভুল হলে হিসাব বাড়ায় --
+    def _session_for(self, code):
+        s = _get_session(code)
+        ip = self.client_address[0]
+        if s is None:
+            _record_fail(ip)
+        else:
+            _record_success(ip)
+        return s
 
     # -- /register --
     def _handle_register(self):
@@ -210,6 +281,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         code = str(data["code"])
         name = str(data.get("name") or "বাড়ি")[:64]
+        ip = self.client_address[0]
+        now = time.time()
+        with _attempts_lock:
+            rec = _attempts_for(ip)
+            rec["regs"] = [t for t in rec["regs"] if now - t < REG_WINDOW]
+            if len(rec["regs"]) >= REG_LIMIT:
+                self._send_json(429, {"error": "too many sessions from this address"})
+                return
+            rec["regs"].append(now)
         s = Session(name)
         with _sessions_lock:
             _sessions[code] = s
@@ -219,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_status(self, parsed):
         from urllib.parse import parse_qs
         code = parse_qs(parsed.query).get("code", [""])[0]
-        s = _get_session(code)
+        s = self._session_for(code)
         if s is None:
             self._send_json(200, {"active": False, "secondsLeft": 0})
             return
@@ -230,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_poll(self, parsed):
         from urllib.parse import parse_qs
         code = parse_qs(parsed.query).get("code", [""])[0]
-        s = _get_session(code)
+        s = self._session_for(code)
         if s is None:
             self._send_json(410, {"error": "code unknown or expired"})
             return
@@ -262,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "code must be 6 digits"})
             return
         code = str(data["code"])
-        s = _get_session(code)
+        s = self._session_for(code)
         if s is None:
             self._send_json(410, {"error": "code unknown or expired"})
             return
@@ -290,6 +370,10 @@ class Handler(BaseHTTPRequestHandler):
         code = str(data["code"])
         with _sessions_lock:
             s = _sessions.pop(code, None)
+        if s is None:
+            _record_fail(self.client_address[0])
+        else:
+            _record_success(self.client_address[0])
         if s is not None:
             with s.cond:
                 s.alive = False
@@ -310,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
         if not CODE_RE.match(code):
             self._send_json(400, {"error": "code must be 6 digits"})
             return
-        s = _get_session(code)
+        s = self._session_for(code)
         if s is None:
             self._send_json(410, {"error": "code unknown or expired"})
             return
