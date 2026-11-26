@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>বাড়ির রাউটার — RouterFix প্যানেল</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #04122e; color: #fff; min-height: 100vh; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 18px 14px 40px; }
+  h1 { font-size: 22px; margin: 6px 0 2px; }
+  h1 span { color: #22e584; }
+  .sub { color: #bfd9e8; font-size: 14px; margin: 0 0 16px; }
+  .card { background: rgba(10,30,60,.85); border: 2px solid #2fa8ff; border-radius: 18px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; color: #bfd9e8; font-size: 13px; margin: 10px 0 4px; }
+  input { width: 100%; padding: 12px; border-radius: 10px; border: 2px solid #2fa8ff; background: #061a33; color: #fff; font-size: 17px; }
+  input.code { font-size: 26px; letter-spacing: 10px; text-align: center; font-weight: bold; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  button { flex: 1; min-width: 140px; padding: 13px 10px; border: 0; border-radius: 28px; font-size: 16px; font-weight: bold; cursor: pointer; color: #fff; }
+  .btn-blue { background: linear-gradient(#2fa8ff, #1565ff); }
+  .btn-green { background: linear-gradient(#22e584, #00a651); }
+  .btn-red { background: linear-gradient(#e53935, #b71c1c); }
+  .btn-grey { background: linear-gradient(#5f6b7a, #3a4552); }
+  button:disabled { opacity: .5; cursor: default; }
+  #msg { margin-top: 12px; font-size: 15px; min-height: 22px; }
+  #msg.ok { color: #22e584; }
+  #msg.err { color: #ff8a80; }
+  #count { font-size: 20px; font-weight: bold; color: #ffd600; }
+  #frameWrap { display: none; }
+  #frameWrap.on { display: block; }
+  iframe { width: 100%; height: 62vh; border: 2px solid #2fa8ff; border-radius: 12px; background: #fff; }
+  .hint { color: #8fa8c0; font-size: 13px; margin-top: 10px; }
+  a { color: #2fa8ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Router<span>Fix</span> — বাড়ির রাউটার</h1>
+  <p class="sub">দূর থেকে রাউটার সাপোর্ট — ফোনের অ্যাপে বানানো ৬ সংখ্যার কোড বসান।</p>
+
+  <div class="card">
+    <label for="server">সার্ভার ঠিকানা</label>
+    <input id="server" type="text" value="https://163-52-42-58.sslip.io">
+    <label for="code">অ্যাক্সেস কোড (৬ সংখ্যা)</label>
+    <input id="code" class="code" type="text" inputmode="numeric" maxlength="6" placeholder="------" autocomplete="off">
+    <div class="row">
+      <button class="btn-blue" id="connectBtn" onclick="connect()">সংযোগ করুন</button>
+      <button class="btn-grey" onclick="testConn()">সংযোগ পরীক্ষা করুন</button>
+    </div>
+    <div id="msg"></div>
+    <div class="hint">মেয়াদ: <span id="count">--:--</span> &nbsp;·&nbsp; <a id="openTab" href="#" target="_blank" rel="noopener">আলাদা ট্যাবে খুলুন</a></div>
+    <div class="row">
+      <button class="btn-red" id="stopBtn" onclick="stopSession()" disabled>সেশন এখনই বন্ধ করুন</button>
+    </div>
+  </div>
+
+  <div class="card" id="frameWrap">
+    <iframe id="rframe" title="রাউটার"></iframe>
+  </div>
+
+  <p class="hint">কোডের মেয়াদ ৩০ মিনিট। ফোনের অ্যাপ বন্ধ করলে বা মেয়াদ শেষ হলে সেশন শেষ হয়ে যাবে। রাউটারের পাসওয়ার্ড এই প্যানেলে বা সার্ভারে জমা থাকে না।</p>
+</div>
+
+<script>
+var SERVER_CANDIDATES = [];
+var timer = null;
+var secondsLeft = 0;
+
+function base() {
+  var v = document.getElementById('server').value.trim().replace(/\/+$/, '');
+  return v;
+}
+function msg(t, ok) {
+  var m = document.getElementById('msg');
+  m.textContent = t;
+  m.className = ok ? 'ok' : 'err';
+}
+function fmt(s) {
+  s = Math.max(0, s|0);
+  var m = Math.floor(s/60), r = s%60;
+  return (m<10?'0':'')+m+':'+(r<10?'0':'')+r;
+}
+function tick() {
+  document.getElementById('count').textContent = fmt(secondsLeft);
+  if (secondsLeft <= 0) { stopTick(); return; }
+  secondsLeft--;
+}
+function startTick() { stopTick(); timer = setInterval(tick, 1000); }
+function stopTick() { if (timer) { clearInterval(timer); timer = null; } }
+
+function candidates() {
+  var b = base();
+  var list = [b];
+  // 443 না চললে 8443 চেষ্টা করো
+  if (b === 'https://163-52-42-58.sslip.io') list.push('https://163-52-42-58.sslip.io:8443');
+  if (b === 'https://163-52-42-58.sslip.io:8443') list.push('https://163-52-42-58.sslip.io');
+  return list;
+}
+
+async function fetchRelay(path, opts) {
+  var lastErr = null;
+  for (var i = 0; i < candidates().length; i++) {
+    var url = candidates()[i] + path;
+    try {
+      var r = await fetch(url, opts);
+      // নেটওয়ার্ক এরর হলে পরের ঠিকানা চেষ্টা করো; HTTP উত্তর এলে সেটাই ফেরত দাও
+      return { res: r, base: candidates()[i] };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('সার্ভারে পৌঁছানো যায়নি');
+}
+
+async function testConn() {
+  msg('সার্ভার পরীক্ষা করা হচ্ছে…', true);
+  try {
+    var out = await fetchRelay('/', {});
+    var j = await out.res.json();
+    msg('সার্ভার চালু আছে — চলমান সেশন: ' + (j.sessions || 0), true);
+  } catch (e) {
+    msg('সার্ভারে পৌঁছানো যায়নি — সার্ভার ঠিকানা দেখুন।', false);
+  }
+}
+
+async function connect() {
+  var code = document.getElementById('code').value.trim();
+  if (!/^\d{6}$/.test(code)) { msg('৬ সংখ্যার কোড বসান।', false); return; }
+  msg('কোড যাচাই করা হচ্ছে…', true);
+  try {
+    var out = await fetchRelay('/status?code=' + encodeURIComponent(code), {});
+    var j = await out.res.json();
+    if (!j.active) { msg('কোডটি চালু নেই বা মেয়াদ শেষ — অ্যাপে নতুন কোড বানান।', false); return; }
+    secondsLeft = j.secondsLeft || 0;
+    document.getElementById('server').value = out.base;
+    document.getElementById('rframe').src = out.base + '/r/' + code + '/';
+    document.getElementById('openTab').href = out.base + '/r/' + code + '/';
+    document.getElementById('frameWrap').classList.add('on');
+    document.getElementById('stopBtn').disabled = false;
+    document.getElementById('connectBtn').disabled = true;
+    startTick();
+    msg('সংযুক্ত হয়েছে — রাউটারের পেজ নিচে আসছে।', true);
+    // ১৫ সেকেন্ড পরপর সেশন বেঁচে আছে কি না দেখো
+    setTimeout(pollStatus, 15000);
+  } catch (e) {
+    msg('সার্ভারে পৌঁছানো যায়নি — সার্ভার ঠিকানা দেখুন।', false);
+  }
+}
+
+async function pollStatus() {
+  var code = document.getElementById('code').value.trim();
+  if (!/^\d{6}$/.test(code)) return;
+  try {
+    var out = await fetchRelay('/status?code=' + encodeURIComponent(code), {});
+    var j = await out.res.json();
+    if (!j.active) {
+      msg('সেশন শেষ হয়ে গেছে (ফোনের অ্যাপ বন্ধ বা মেয়াদ শেষ)।', false);
+      stopTick();
+      document.getElementById('stopBtn').disabled = true;
+      document.getElementById('connectBtn').disabled = false;
+      return;
+    }
+    secondsLeft = j.secondsLeft || secondsLeft;
+    setTimeout(pollStatus, 15000);
+  } catch (e) { setTimeout(pollStatus, 15000); }
+}
+
+async function stopSession() {
+  var code = document.getElementById('code').value.trim();
+  if (!/^\d{6}$/.test(code)) return;
+  try {
+    await fetchRelay('/stop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({code: code}) });
+  } catch (e) {}
+  stopTick();
+  secondsLeft = 0;
+  document.getElementById('count').textContent = '--:--';
+  document.getElementById('frameWrap').classList.remove('on');
+  document.getElementById('rframe').src = 'about:blank';
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('connectBtn').disabled = false;
+  msg('সেশন বন্ধ করা হয়েছে।', true);
+}
+</script>
+</body>
+</html>
